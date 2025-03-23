@@ -23,7 +23,7 @@ I'll add more in-depth guides to this at a later point but for now please refer 
 If you have any other external "exploits" feel free to make an issue and I'll look into adding it
 
 ### Buy me a coffee
-Don't feel obligated but know I very much appreciate this <3
+Don't feel obligated but know I very much appreciate this <3\
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/nlaykon)
 
 ## License
