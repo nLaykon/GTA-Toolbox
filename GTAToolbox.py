@@ -15,7 +15,7 @@ from PIL import Image, ImageTk
 
 version = "v0.11"
 
-configFile = "Suspend.ini"
+configFile = "GTAToolbox.ini"
 config = configparser.ConfigParser()
 
 if not path.exists(configFile):
