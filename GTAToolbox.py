@@ -10,21 +10,26 @@ import configparser
 from os import path
 from sys import exit
 import tkinter as tk
-from tkinter import ttk
-from PIL import Image, ImageTk
+from inputs import get_gamepad, UnpluggedError
 
-version = "v0.11"
+version = "v0.13"
 
 configFile = "GTAToolbox.ini"
 config = configparser.ConfigParser()
 
 if not path.exists(configFile):
     config["Game"] = {
-        "exe_name" : "GTA5_Enhanced.exe"
+        "exe_name": "GTA5_Enhanced.exe"
     }
     config["Keybinds"] = {
         "suspend": "Insert",
         "nosave": "Delete"
+    }
+    config["ControllerKeybinds"] = {
+        "suspend": "BTN_START + BTN_SELECT",
+        "nosave": "BTN_THUMBL + BTN_THUMBR",
+        
+        "guide" : ""
     }
     config["Graphics"] = {
         "transparent_window": "on",
@@ -32,9 +37,13 @@ if not path.exists(configFile):
         "win_y": "25",
         "outline": "1",
         "keybind_bg": "#34495e",
-        "nosave_bg" : "#e74c3c",
+        "nosave_bg": "#e74c3c",
         "warning_bg": "#e74c3c",
-        "font_size" : "12"
+        "font_size": "12"
+    }
+    config["Settings"] = {
+        "THIS IS IN DEVELOPMENT IT WILL STILL WORK BUT LOOKS UGLY": "",
+        "controller_mode": "off"
     }
     config["Debug"] = {
         "version": version
@@ -44,17 +53,21 @@ if not path.exists(configFile):
 
 config.read(configFile)
 
-if (version != config["Debug"]["version"]):
+if version != config["Debug"]["version"]:
     print("Version mismatch, this could cause unintended behavior")
     xInput = input("Continue? (y/n): ")
-    if (xInput.lower() != "y"):
+    if xInput.lower() != "y":
         exit("Exiting due to version mismatch.")
-
 
 process_name = config["Game"]["exe_name"]
 
 suspendKeybind = config["Keybinds"]["suspend"]
 nosaveKeybind = config["Keybinds"]["nosave"]
+
+controller_suspend_bind = config["ControllerKeybinds"]["suspend"].split(" + ")
+controller_nosave_bind = config["ControllerKeybinds"]["nosave"].split(" + ")
+
+controller_mode = config["Settings"]["controller_mode"].lower() == "on"
 
 keybind_bg = config["Graphics"]["keybind_bg"]
 nosave_bg = config["Graphics"]["nosave_bg"]
@@ -62,13 +75,9 @@ warning_bg = config["Graphics"]["warning_bg"]
 
 win_x = int(config["Graphics"]["win_x"])
 win_y = int(config["Graphics"]["win_y"])
+outline = int(config["Graphics"]["outline"])
 
-outline = config["Graphics"]["outline"]
-
-outline = int(outline)
-
-
-transparent_window = (config["Graphics"]["transparent_window"] == "on")
+transparent_window = config["Graphics"]["transparent_window"] == "on"
 
 def check_admin():
     try:
@@ -76,26 +85,9 @@ def check_admin():
     except:
         return False
 
-def show_admin_warning():
-    warning_root = tk.Tk()
-    warning_root.overrideredirect(True)
-    warning_root.attributes("-topmost", True)
-    warning_root.attributes("-alpha", 0.85)
-    warning_root.title("Admin Warning")
-    warning_root.geometry("300x100+{0}+{1}".format(
-        (warning_root.winfo_screenwidth() // 2) - 150,
-        (warning_root.winfo_screenheight() // 2) - 50
-    ))
-    label = tk.Label(warning_root, text="Admin privileges are required!\nExiting in 5 seconds.", 
-                     fg="white", bg="red", font=("Aharoni", 12), justify="center")
-    label.pack(expand=True, fill="both")
-    
-    warning_root.after(5000, lambda: warning_root.destroy())
-    warning_root.mainloop()
-    exit()
-
 if not check_admin():
-    show_admin_warning()
+    print("Admin privileges are required! Exiting.")
+    exit()
 
 ntdll = ctypes.WinDLL("ntdll")
 kernel32 = ctypes.WinDLL("kernel32")
@@ -132,15 +124,12 @@ class Overlay(tk.Toplevel):
         self.overrideredirect(True)
         self.attributes("-topmost", True)
         self.attributes("-alpha", 0.9)
-        if (transparent_window):
+        if transparent_window:
             self.wm_attributes("-transparentcolor", background_color)
         self.config(bg=background_color)
-        
-        canvas = tk.Canvas(self, width=width, height=height, bg=background_color, bd=0, highlightthickness=outline)
-        canvas.pack()
 
-        self.label = tk.Label(self, text=text, fg=text_color, bg=background_color, font=("Aharoni", 12))
-        self.label.place(relx=0.5, rely=0.5, anchor="center")
+        self.label = tk.Label(self, text=text, fg=text_color, bg=background_color, font=("Aharoni", 12), highlightthickness=outline)
+        self.label.pack(expand=True, fill="both")
 
     def show_overlay(self):
         self.deiconify()
@@ -244,43 +233,54 @@ def listen_for_no_save_toggle():
         keyboard.wait(nosaveKeybind)
         command_queue.put("toggle_no_save")
 
+controller_state = set()
+
+def listen_for_controller():
+    global controller_state
+    while True:
+        try:
+            events = get_gamepad()
+            for event in events:
+                if event.ev_type == "Key":
+                    if event.state == 1:
+                        controller_state.add(event.code)
+                    elif event.state == 0:
+                        controller_state.discard(event.code)
+
+                    if all(btn in controller_state for btn in controller_suspend_bind):
+                        suspend_and_resume()
+
+                    if all(btn in controller_state for btn in controller_nosave_bind):
+                        command_queue.put("toggle_no_save")
+        except UnpluggedError:
+            time.sleep(1)
+            continue
+
 root = tk.Tk()
-if (transparent_window):
-    root.wm_attributes('-transparentcolor', '#000000')
 root.withdraw()
 root.geometry("300x150+10+10")
 root.attributes("-topmost", True)
 root.config(bg="#2c3e50")
 
-keybind_overlay = Overlay(root, 
-                          f"{process_name}\n\nKeybinds:\nSuspend Kick: {suspendKeybind}\nToggle Nosave: {nosaveKeybind}", 
-                          keybind_bg, "white", 170, 100)
-keybind_overlay.show_overlay()
+if controller_mode:
+    overlay_text = f"{process_name}\n\nController Keybinds:\nSuspend: {' + '.join(controller_suspend_bind)}\nNo Save: {' + '.join(controller_nosave_bind)}"
+else:
+    overlay_text = f"{process_name}\n\nKeybinds:\nSuspend: {suspendKeybind}\nNo Save: {nosaveKeybind}"
 
-nosave_overlay = Overlay(root, "No Save Activated", nosave_bg, "white", 150, 50)
-nosave_overlay.withdraw()
+keybind_overlay = Overlay(root, overlay_text, keybind_bg, "white", 200, 120)
+keybind_overlay.show_overlay()
 
 warning_overlay = WarningOverlay(root, 
                                  "Process suspended!", 
                                  warning_bg, "white", 200, 200)
 
-def hide_keybind_window():
-    keybind_overlay.hide_overlay()
-
-def show_keybind_window():
-    if not nosave_overlay.winfo_ismapped():
-        keybind_overlay.show_overlay()
+nosave_overlay = Overlay(root, "No Save Activated", nosave_bg, "white", 150, 50)
+nosave_overlay.withdraw()
 
 threading.Thread(target=listen_for_suspend_resume, daemon=True).start()
 threading.Thread(target=listen_for_no_save_toggle, daemon=True).start()
+threading.Thread(target=listen_for_controller, daemon=True).start()
 
 process_commands()
 
-def manage_visibility():
-    if nosave_overlay.winfo_ismapped():
-        keybind_overlay.hide_overlay()
-    else:
-        show_keybind_window()
-
-root.after(100, manage_visibility)
 root.mainloop()
